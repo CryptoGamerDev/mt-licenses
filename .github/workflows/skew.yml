@@ -1,0 +1,50 @@
+name: Aktualizacja sygnalu SKEW
+
+# Regeneruje xag_skew.csv z oficjalnych danych CBOE i wypycha, gdy sie zmienil.
+# Plik czyta panel "Strategie MT5" i podaje EA XAGUSD_TrendMacro przez Common\Files.
+# EA ma wlasna ochrone: dane starsze niz 10 dni => filtr sie wylacza i strategia
+# wraca do zachowania bazowego. Awaria tego automatu jest wiec bezpieczna, ale
+# oznacza utrate przewagi - dlatego workflow ma sie glosno wysypac przy problemie.
+
+on:
+  schedule:
+    - cron: "30 2 * * 2-6"      # wt-sob 02:30 UTC = po zamknieciu sesji US z poprzedniego dnia
+  workflow_dispatch:             # mozliwosc recznego uruchomienia z zakladki Actions
+
+permissions:
+  contents: write
+
+concurrency:
+  group: skew-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generuj sygnal z danych CBOE
+        run: python3 tools/make_skew.py xag_skew.csv
+
+      - name: Kontrola swiezosci danych
+        run: |
+          LAST=$(tail -1 xag_skew.csv | cut -d';' -f1 | tr '.' '-')
+          AGE=$(( ( $(date -u +%s) - $(date -u -d "$LAST" +%s) ) / 86400 ))
+          echo "Ostatni rekord: $LAST (sprzed $AGE dni)"
+          if [ "$AGE" -gt 6 ]; then
+            echo "::error::Dane CBOE starsze niz 6 dni - filtr w EA wylaczy sie po 10 dniach."
+            exit 1
+          fi
+
+      - name: Wypchnij, jesli sie zmienil
+        run: |
+          if git diff --quiet -- xag_skew.csv; then
+            echo "Bez zmian - nie commituje."
+            exit 0
+          fi
+          git config user.name  "skew-bot"
+          git config user.email "actions@github.com"
+          git add xag_skew.csv
+          git commit -m "Aktualizacja sygnalu SKEW ($(tail -1 xag_skew.csv | cut -d';' -f1))"
+          git push
