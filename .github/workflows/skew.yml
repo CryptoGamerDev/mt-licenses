@@ -22,7 +22,7 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Generuj sygnal z danych CBOE
         run: python3 tools/make_skew.py xag_skew.csv
